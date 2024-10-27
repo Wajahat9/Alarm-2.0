@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="allowed-autoplay-audio" content="true">
+    <title>Smart Alarm</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(45deg, #1a1a1a, #2c3e50);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+            width: 90%;
+            max-width: 400px;
+        }
+
+        .clock {
+            font-size: 3.5rem;
+            text-align: center;
+            margin-bottom: 2rem;
+            font-weight: 300;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        input[type="time"] {
+            width: 100%;
+            padding: 0.8rem;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 1.2rem;
+        }
+
+        button {
+            padding: 1rem;
+            border: none;
+            border-radius: 8px;
+            background: #3498db;
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #2980b9;
+        }
+
+        .test-btn {
+            background: #27ae60;
+            margin-top: 0.5rem;
+        }
+        
+        .test-btn:hover {
+            background: #219a52;
+        }
+
+        .alarms-list {
+            margin-top: 2rem;
+        }
+
+        .alarm-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.8rem;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .delete-btn {
+            background: #e74c3c;
+            padding: 0.5rem 1rem;
+        }
+
+        .delete-btn:hover {
+            background: #c0392b;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                width: 95%;
+                padding: 1.5rem;
+            }
+
+            .clock {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="clock" id="clock">00:00:00</div>
+        <div class="controls">
+            <input type="time" id="alarmTime">
+            <button onclick="setAlarm()">Set Alarm</button>
+            <button onclick="testAlarm()" class="test-btn">Test Sound</button>
+        </div>
+        <div class="alarms-list" id="alarmsList"></div>
+    </div>
+
+    <script>
+        let alarms = [];
+        let audioContext = null;
+
+        // Initialize audio context on first user interaction
+        document.addEventListener('click', initAudioContext, { once: true });
+
+        // Register service worker for background notifications
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js')
+                .then(registration => console.log('ServiceWorker registered'))
+                .catch(err => console.log('ServiceWorker registration failed:', err));
+        }
+
+        // Request notification permission
+        if ('Notification' in window) {
+            Notification.requestPermission();
+        }
+
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playAlarmSound() {
+            // Ensure audio context is initialized
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            // Create oscillator and gain node
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            // Configure oscillator
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4 note
+
+            // Configure gain (volume)
+            gainNode.gain.setValueAtTime(1, audioContext.currentTime);
+
+            // Connect nodes
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            // Start the sound
+            oscillator.start();
+
+            // Create a repeating beep pattern
+            let isPlaying = true;
+            const beepInterval = setInterval(() => {
+                if (isPlaying) {
+                    gainNode.gain.setValueAtTime(1, audioContext.currentTime);
+                } else {
+                    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                }
+                isPlaying = !isPlaying;
+            }, 500); // Toggle every 500ms
+
+            // Stop after 10 seconds
+            setTimeout(() => {
+                clearInterval(beepInterval);
+                oscillator.stop();
+                oscillator.disconnect();
+                gainNode.disconnect();
+            }, 10000);
+
+            // Return the interval ID so we can clear it if needed
+            return beepInterval;
+        }
+
+        function testAlarm() {
+            playAlarmSound();
+        }
+
+        function updateClock() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', { 
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            document.getElementById('clock').textContent = timeString;
+
+            // Check alarms
+            checkAlarms(now);
+        }
+
+        function setAlarm() {
+            const timeInput = document.getElementById('alarmTime');
+            const time = timeInput.value;
+            
+            if (time) {
+                alarms.push(time);
+                updateAlarmsList();
+                timeInput.value = '';
+            }
+        }
+
+        function deleteAlarm(index) {
+            alarms.splice(index, 1);
+            updateAlarmsList();
+        }
+
+        function updateAlarmsList() {
+            const alarmsList = document.getElementById('alarmsList');
+            alarmsList.innerHTML = '';
+            
+            alarms.forEach((alarm, index) => {
+                const alarmItem = document.createElement('div');
+                alarmItem.className = 'alarm-item';
+                alarmItem.innerHTML = `
+                    <span>${alarm}</span>
+                    <button class="delete-btn" onclick="deleteAlarm(${index})">Delete</button>
+                `;
+                alarmsList.appendChild(alarmItem);
+            });
+        }
+
+        function checkAlarms(now) {
+            const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            
+            alarms.forEach((alarm, index) => {
+                if (alarm === currentTime) {
+                    // Play sound
+                    const beepInterval = playAlarmSound();
+                    
+                    // Show notification
+                    if (Notification.permission === "granted") {
+                        new Notification("Alarm!", {
+                            body: "Your alarm is ringing!",
+                            icon: "https://example.com/alarm-icon.png"
+                        });
+                    }
+                    
+                    // Show alert and stop sound when alert is dismissed
+                    const alertResult = confirm('Alarm! Click OK to stop the alarm.');
+                    if (alertResult) {
+                        clearInterval(beepInterval);
+                    }
+                    
+                    deleteAlarm(index);
+                }
+            });
+        }
+
+        // Update clock every second
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
+</body>
+</html>
